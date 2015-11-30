@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <fstream>
 #include <sstream>
+#include <string.h>
 using namespace std;
 
 #define MAX_PARTITION_LENGTH 10
@@ -27,7 +28,18 @@ struct Candidate
 struct Strategy
 {
     vector<vector<int>*>* partition;
-    PartitionVote* strategy;
+
+    short fixedSeats;
+    short validNumber;
+
+    int* remainers;
+    int* remainersCount;
+
+    ~Strategy()
+    {
+        delete remainers;
+        delete remainersCount;
+    }
 };
 
 
@@ -141,13 +153,14 @@ void ClearPartitions(vector<vector<vector<int>* > *>& partitions);
 void ReadFile(const string& fileName);
 void MiniMaxAlgorithm(vector<Strategy*> &party1, vector<Strategy*> &party2, char* & result, double& currentMax, bool swapIndex);
 void OutputResult(char* partyResultA, char* partyResultB);
-void OutputResult(int i, int j);
+void OutputResult(int i, int j, double result);
+void OutputResult(char* partyResult, double result);
+
+void ConstructStrategy(PartitionVote* pPartitionVote, int* remainers, int* remainersCount, short& validNumber, short& fixedSeats);
 
 int main(int argc, char* argv[])
 {
-    clock_t start = clock();
     string fileName = argv[1];
-    string outputFileName = fileName + ".time";
 
     ReadFile(fileName);
 
@@ -175,42 +188,70 @@ int main(int argc, char* argv[])
     g_partyA_size = g_strategiesA.size();
     g_partyB_size = g_strategiesB.size();
 
-    ofstream myfile;
-    myfile.open(outputFileName.c_str());
+    int voteSumA = GetVoteSum(g_partyA);
+    int voteSumB = GetVoteSum(g_partyB);
 
-    char* possibleResultA;
-    MiniMaxAlgorithm(g_strategiesA, g_strategiesB, possibleResultA, g_currentMax, false);
+    char* possibleResultA = NULL;
 
-    double tempMax = 0;
-    char* possibleResultB;
-    MiniMaxAlgorithm(g_strategiesB, g_strategiesA, possibleResultB, tempMax, true);
-
-    size_t size = g_partyA_size * g_partyB_size;
-    size_t sum = 0;
-
-    for (size_t i = 0; i < size; i++)
+    if (g_seats != 1 || (g_seats == 1 && voteSumA >= voteSumB))
     {
-        size_t array_index = i / 8;
-        size_t bit_index = i % 8;
-        bool isResultA = possibleResultA[array_index] & (1 << bit_index);
-        bool isResultB = possibleResultB[array_index] & (1 << bit_index);
-
-        if (isResultA && isResultB)
-        {
-            sum++;
-        }
+        MiniMaxAlgorithm(g_strategiesA, g_strategiesB, possibleResultA, g_currentMax, false);
     }
 
-    myfile << sum << endl;
-    myfile << g_currentMax << " " << g_seats - g_currentMax << endl;
-    myfile.close();
+    double tempMax = 0;
+    char* possibleResultB = NULL;
 
-    // OutputResult(possibleResultA, possibleResultB);
+    if (g_seats != 1 || (g_seats == 1 && voteSumB >= voteSumA))
+    {
+        MiniMaxAlgorithm(g_strategiesB, g_strategiesA, possibleResultB, tempMax, true);
+    }
+
+    if (g_seats == 1 && (voteSumA != voteSumB))
+    {
+        char* resultArray = possibleResultA == NULL ? possibleResultB : possibleResultA;
+        double tempResult = possibleResultA == NULL ? tempMax : g_currentMax;
+        OutputResult(resultArray, tempResult);
+    }
+    else
+    {
+        OutputResult(possibleResultA, possibleResultB);
+    }
+
+
+    for (int i = 0; i < g_strategiesA.size(); i++)
+    {
+        delete g_strategiesA[i];
+    }
+
+    for (int i = 0; i < g_strategiesB.size(); i++)
+    {
+        delete g_strategiesB[i];
+    }
 
     delete possibleResultA;
     delete possibleResultB;
 
     return 0;
+}
+
+void OutputResult(char* partyResult, double result)
+{
+    size_t size = g_partyA_size * g_partyB_size;
+
+    for (size_t i = 0; i < size; i++)
+    {
+        size_t array_index = i / 8;
+        size_t bit_index = i % 8;
+
+        bool isResult = partyResult[array_index] & (1 << bit_index);
+
+        if (isResult)
+        {
+            int strategyA = i / g_partyB_size;
+            int strategyB = i % g_partyB_size;
+            OutputResult(strategyA, strategyB, result);
+        }
+    }
 }
 
 void OutputResult(char* partyResultA, char* partyResultB)
@@ -228,21 +269,19 @@ void OutputResult(char* partyResultA, char* partyResultB)
         {
             int strategyA = i / g_partyB_size;
             int strategyB = i % g_partyB_size;
-            OutputResult(strategyA, strategyB);
+            OutputResult(strategyA, strategyB, g_currentMax);
         }
-
     }
 }
 
-
-void OutputResult(int i, int j)
+void OutputResult(int i, int j, double result)
 {
         cout << "(";
         OutputPartition(g_strategiesA, i, g_partyA);
         cout << ",";
         OutputPartition(g_strategiesB, j, g_partyB);
         cout << ")";
-        cout << " payoff (" << g_currentMax << "," << g_seats - g_currentMax << ")" << endl;
+        cout << " payoff (" << result << "," << g_seats - result << ")" << endl;
 }
 
 void OutputPartition(vector<Strategy*>& strategies, int strategy, map<int, Candidate>& party)
@@ -323,61 +362,68 @@ void ReadFile(const string& fileName)
 
 void PayOff(Strategy* pStrategyA, Strategy* pStrategyB, double& valueA, double& valueB)
 {
-    valueA = pStrategyA->strategy->fixedSeats;
-    valueB = pStrategyB->strategy->fixedSeats;
+    valueA = pStrategyA->fixedSeats;
+    valueB = pStrategyB->fixedSeats;
 
     double leftSeats = g_seats - valueA - valueB;
-    map<int, int>::iterator iterA = pStrategyA->strategy->remainers->begin();
-    map<int, int>::iterator iterB = pStrategyB->strategy->remainers->begin();
+    short validNumberA = pStrategyA->validNumber;
+    short validNumberB = pStrategyB->validNumber;
+    int* remainerA = pStrategyA->remainers;
+    int* remainerB = pStrategyB->remainers;
+    int* remainerCountA = pStrategyA->remainersCount;
+    int* remainerCountB = pStrategyB->remainersCount;
+
+    short currentNumberA = 0;
+    short currentNumberB = 0;
 
     while (leftSeats > 0 + PRECISE)
     {
-        if (iterA == pStrategyA->strategy->remainers->end())
+        if (currentNumberA >= validNumberA)
         {
             valueB += leftSeats;
             break;
         }
 
-        if (iterB == pStrategyB->strategy->remainers->end())
+        if (currentNumberB >= validNumberB)
         {
             valueA += leftSeats;
             break;
         }
 
-        if (iterA->first > iterB->first)
+        if (remainerA[currentNumberA] > remainerB[currentNumberB])
         {
-            double newSeats = min((double)iterA->second, leftSeats);
+            double newSeats = min((double)remainerCountA[currentNumberA], leftSeats);
             valueA += newSeats;
             leftSeats -= newSeats;
 
-            iterA++;
+            currentNumberA++;
         }
-        else if (iterA->first < iterB->first)
+        else if (remainerA[currentNumberA] < remainerB[currentNumberB])
         {
-            double newSeats = min((double)iterB->second, leftSeats);
+            double newSeats = min((double)remainerCountB[currentNumberB], leftSeats);
             valueB += newSeats;
             leftSeats -= newSeats;
 
-            iterB++;
+            currentNumberB++;
         }
         else
         {
-            double totalNumber = iterA->second + iterB->second;
+            double totalNumber = remainerCountA[currentNumberA] + remainerCountB[currentNumberB];
 
             if ((int)totalNumber <= leftSeats)
             {
-                valueA += iterA->second;
-                valueB += iterB->second;
+                valueA += remainerCountA[currentNumberA];
+                valueB += remainerCountB[currentNumberB];
             }
             else
             {
-                valueA += iterA->second / totalNumber * leftSeats;
-                valueB += iterB->second / totalNumber * leftSeats;
+                valueA += remainerCountA[currentNumberA] / totalNumber * leftSeats;
+                valueB += remainerCountB[currentNumberB] / totalNumber * leftSeats;
             }
 
             leftSeats -= totalNumber;
-            iterA++;
-            iterB++;
+            currentNumberA++;
+            currentNumberB++;
         }
     }
 }
@@ -396,10 +442,15 @@ void ConstructResult(vector<vector<int>* >& prefix, const int* pSuffix, const in
     PartitionVote* pStrategy = new PartitionVote();
     pStrategy->UpdatePartitionVote(*pNewPartition, g_seats, g_quota, party);
 
+    
     Strategy* pNewStrategy = new Strategy();
     pNewStrategy->partition = pNewPartition;
-    pNewStrategy->strategy = pStrategy;
+    pNewStrategy->remainers = new int[MAX_PARTITION_LENGTH];
+    pNewStrategy->remainersCount = new int[MAX_PARTITION_LENGTH];
+    ConstructStrategy(pStrategy, pNewStrategy->remainers, pNewStrategy->remainersCount, pNewStrategy->validNumber, pNewStrategy->fixedSeats);
     strategies.push_back(pNewStrategy);
+
+    delete pStrategy;
 }
 
 void GetAllPartitions(vector<vector<int>* >& prefix, const int* pSuffix, const int iSuffixLength, map<int, Candidate>& party, vector<Strategy*>& strategies)
@@ -538,7 +589,16 @@ void MiniMaxAlgorithm(vector<Strategy*> &party1, vector<Strategy*> &party2,
     }
 }
 
+void ConstructStrategy(PartitionVote* pPartitionVote, int* remainers, int* remainersCount, short& validNumber, short& fixedSeats)
+{
+    fixedSeats = pPartitionVote->fixedSeats;
 
+    for (map<int, int>::iterator iter = pPartitionVote->remainers->begin(); iter != pPartitionVote->remainers->end(); iter++)
+    {
+        remainers[validNumber] = iter->first;
+        remainersCount[validNumber++] = iter->second;
+    }
+}
 
 
 
