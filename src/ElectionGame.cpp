@@ -209,7 +209,7 @@ int main(int argc, char* argv[])
     if (g_seats == 1 && (voteSumA != voteSumB))
     {
         char* resultArray = possibleResultA == NULL ? possibleResultB : possibleResultA;
-        double tempResult = possibleResultA == NULL ? tempMax : g_currentMax;
+        double tempResult = possibleResultA == NULL ? (g_seats - tempMax) : g_currentMax;
         OutputResult(resultArray, tempResult);
     }
     else
