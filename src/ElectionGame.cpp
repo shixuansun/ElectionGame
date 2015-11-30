@@ -98,7 +98,6 @@ public:
 // Global Variable
 vector<Strategy*> g_strategiesA;
 vector<Strategy*> g_strategiesB;
-vector<int> g_possibleSolution;
 
 // Party A
 map<int, Candidate> g_partyA;
@@ -119,9 +118,6 @@ double g_currentMax;
 size_t g_partyA_size;
 size_t g_partyB_size;
 
-int GetQuotas(const int seats, map<int, Candidate>& partyA, map<int, Candidate>& partyB);
-void OutputPartition(vector<Strategy*>& strategies, int strategy, map<int, Candidate>& party);
-
 struct PartitionTuple
 {
     int* pPartitions[2];
@@ -134,6 +130,9 @@ struct PartitionTuple
     }
 };
 
+int GetQuotas(const int seats, map<int, Candidate>& partyA, map<int, Candidate>& partyB);
+int GetVoteSum(map<int, Candidate>& party);
+void OutputPartition(vector<Strategy*>& strategies, int strategy, map<int, Candidate>& party);
 void PartitionTwoParts(const int* pSrc, const int iSrcLength, PartitionTuple* &pPartitions, int& iPartitionsLength);
 void PrintPartitions(const PartitionTuple* pPartitions, const int iLength);
 void GetAllPartitions(vector<vector<int>* >& prefix, const int* pSuffix, const int iSuffixLength, map<int, Candidate>& party, vector<Strategy*>& strategies);
@@ -175,39 +174,31 @@ int main(int argc, char* argv[])
 
     g_partyA_size = g_strategiesA.size();
     g_partyB_size = g_strategiesB.size();
+
     ofstream myfile;
     myfile.open(outputFileName.c_str());
 
     char* possibleResultA;
     MiniMaxAlgorithm(g_strategiesA, g_strategiesB, possibleResultA, g_currentMax, false);
 
-    myfile << g_possibleSolution.size() << endl;
-    myfile << (clock() - start) / CLOCKS_PER_SEC << endl;
-    g_possibleSolution.clear();
-
     double tempMax = 0;
     char* possibleResultB;
     MiniMaxAlgorithm(g_strategiesB, g_strategiesA, possibleResultB, tempMax, true);
 
-    myfile << g_possibleSolution.size() << endl;
-    myfile << (clock() - start ) / CLOCKS_PER_SEC << endl;
-
     size_t size = g_partyA_size * g_partyB_size;
     size_t sum = 0;
+
     for (size_t i = 0; i < size; i++)
     {
         size_t array_index = i / 8;
         size_t bit_index = i % 8;
+        bool isResultA = possibleResultA[array_index] & (1 << bit_index);
+        bool isResultB = possibleResultB[array_index] & (1 << bit_index);
 
-        bool isResult = possibleResultA[array_index] & (1 << bit_index);
-        isResult = isResult && possibleResultB[array_index] & (1 << bit_index);
-        if (isResult)
+        if (isResultA && isResultB)
         {
-            int strategyA = i / g_partyB_size;
-            int strategyB = i % g_partyB_size;
             sum++;
         }
-
     }
 
     myfile << sum << endl;
@@ -391,7 +382,6 @@ void PayOff(Strategy* pStrategyA, Strategy* pStrategyB, double& valueA, double& 
     }
 }
 
-
 void ConstructResult(vector<vector<int>* >& prefix, const int* pSuffix, const int iSuffixLength, map<int, Candidate>& party, vector<Strategy*>& strategies)
 {
     vector<vector<int>* >* pNewPartition = new vector<vector<int>* >();
@@ -466,24 +456,25 @@ void PartitionTwoParts(const int* pSrc, const int iSrcLength, PartitionTuple* &p
     }
 }
 
-int GetQuotas(const int seats, map<int, Candidate>& partyA, map<int, Candidate>& partyB)
+int GetVoteSum(map<int, Candidate>& party)
 {
     int voteSum = 0;
 
-    for (map<int, Candidate>::iterator iter = partyA.begin(); iter != partyA.end(); iter++)
+    for (map<int, Candidate>::iterator iter = party.begin(); iter != party.end(); iter++)
     {
         voteSum += iter->second.votes;
     }
 
-    for (map<int, Candidate>::iterator iter = partyB.begin(); iter != partyB.end(); iter++)
-    {
-        voteSum += iter->second.votes;
-    }
-
-    return voteSum / seats;
+    return voteSum;
 }
 
-void MiniMaxAlgorithm(vector<Strategy*> &party1, vector<Strategy*> &party2, char* & result, double& currentMax, bool swapIndex)
+int GetQuotas(const int seats, map<int, Candidate>& partyA, map<int, Candidate>& partyB)
+{
+    return (GetVoteSum(partyA) + GetVoteSum(partyB)) / seats;
+}
+
+void MiniMaxAlgorithm(vector<Strategy*> &party1, vector<Strategy*> &party2,
+    char* & result, double& currentMax, bool swapIndex)
 {
     currentMax = -1;
 
@@ -492,25 +483,27 @@ void MiniMaxAlgorithm(vector<Strategy*> &party1, vector<Strategy*> &party2, char
 
     size_t size = party1.size() * party2.size() / BYTE_SIZE + 1;
 
+    int* tempResult = new int[party2.size()];
+    int tempResultCount = 0;
+
     result = new char[size];
     memset(result, 0, size);
 
     for (int i = 0; i < party1.size(); i++)
     {
         bool bChanged = false;
-        vector<int> tempResult;
         double currentMin = g_seats + 1;
+
+        tempResultCount = 0;
 
         for (int j = 0; j < party2.size(); j++)
         {
-
             PayOff(party1[i], party2[j], valueA, valueB);
 
             if (valueA - currentMin < -PRECISE)
             {
                 currentMin = valueA;
-                tempResult.clear();
-                vector<int>().swap(tempResult);
+                tempResultCount = 0;
             }
 
             if (currentMin < currentMax - PRECISE)
@@ -521,7 +514,7 @@ void MiniMaxAlgorithm(vector<Strategy*> &party1, vector<Strategy*> &party2, char
 
             if (fabs(valueA - currentMin) < PRECISE)
             {
-                tempResult.push_back(j);
+                tempResult[tempResultCount++] = j;
             }
         }
 
@@ -531,18 +524,16 @@ void MiniMaxAlgorithm(vector<Strategy*> &party1, vector<Strategy*> &party2, char
             {
                 currentMax = currentMin;
                 memset(result, 0, size);
-                g_possibleSolution.clear();
             }
 
-            for (vector<int>::iterator iter = tempResult.begin(); iter != tempResult.end(); iter++)
+            for (int k = 0; k < tempResultCount; k++)
             {
-                size_t index = !swapIndex ? (i * party2.size() + (*iter)) : ((*iter) * party1.size() + i);
+                size_t index = !swapIndex ? (i * party2.size() + (tempResult[k])) : (tempResult[k] * party1.size() + i);
                 size_t array_index = index / 8;
                 size_t bit_index = index % 8;
 
                 result[array_index] |= (1 << bit_index);
             }
-            g_possibleSolution.push_back(i);
         }
     }
 }
